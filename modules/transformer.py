@@ -36,6 +36,23 @@ def create_look_ahead_mask(size):
     return mask  # (seq_len, seq_len)
 
 
+def create_masks(inp, tar):
+    # 编码器填充遮挡
+    enc_padding_mask = create_padding_mask(inp)
+
+    # 在解码器的第二个注意力模块使用。
+    # 该填充遮挡用于遮挡编码器的输出。
+    dec_padding_mask = create_padding_mask(inp)
+
+    # 在解码器的第一个注意力模块使用。
+    # 用于填充（pad）和遮挡（mask）解码器获取到的输入的后续标记（future tokens）。
+    look_ahead_mask = create_look_ahead_mask(tf.shape(tar)[1])
+    dec_target_padding_mask = create_padding_mask(tar)
+    combined_mask = tf.maximum(dec_target_padding_mask, look_ahead_mask)
+
+    return enc_padding_mask, combined_mask, dec_padding_mask
+
+
 def scaled_dot_product_attention(q, k, v, mask):
     """计算注意力权重。
     q, k, v 必须具有匹配的前置维度。
@@ -191,16 +208,14 @@ class DecoderLayer(tf.keras.layers.Layer):
 
 
 class Encoder(tf.keras.layers.Layer):
-    def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size,
-                 maximum_position_encoding, rate=0.1):
+    def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size, maximum_position_encoding, rate=0.1):
         super(Encoder, self).__init__()
 
         self.d_model = d_model
         self.num_layers = num_layers
 
         self.embedding = tf.keras.layers.Embedding(input_vocab_size, d_model)
-        self.pos_encoding = positional_encoding(maximum_position_encoding,
-                                                self.d_model)
+        self.pos_encoding = positional_encoding(maximum_position_encoding, self.d_model)
 
         self.enc_layers = [EncoderLayer(d_model, num_heads, dff, rate)
                            for _ in range(num_layers)]
@@ -224,8 +239,7 @@ class Encoder(tf.keras.layers.Layer):
 
 
 class Decoder(tf.keras.layers.Layer):
-    def __init__(self, num_layers, d_model, num_heads, dff, target_vocab_size,
-                 maximum_position_encoding, rate=0.1):
+    def __init__(self, num_layers, d_model, num_heads, dff, maximum_position_encoding, rate=0.1):
         super(Decoder, self).__init__()
 
         self.d_model = d_model
@@ -233,17 +247,15 @@ class Decoder(tf.keras.layers.Layer):
 
         self.pos_encoding = positional_encoding(maximum_position_encoding, d_model)
 
-        self.dec_layers = [DecoderLayer(d_model, num_heads, dff, rate)
-                           for _ in range(num_layers)]
+        self.dec_layers = [DecoderLayer(d_model, num_heads, dff, rate) for _ in range(num_layers)]
         self.dropout = tf.keras.layers.Dropout(rate)
 
     def call(self, x, enc_output, training, look_ahead_mask, padding_mask):
-        seq_len = tf.shape(x)[1]
+        # seq_len = tf.shape(x)[1]
         attention_weights = {}
 
         for i in range(self.num_layers):
-            x, block1, block2 = self.dec_layers[i](x, enc_output, training,
-                                                   look_ahead_mask, padding_mask)
+            x, block1, block2 = self.dec_layers[i](x, enc_output, training, look_ahead_mask, padding_mask)
 
             attention_weights['decoder_layer{}_block1'.format(i + 1)] = block1
             attention_weights['decoder_layer{}_block2'.format(i + 1)] = block2
@@ -257,11 +269,9 @@ class Transformer(tf.keras.Model):
                  output_size, pe_input, pe_target, rate=0.1):
         super(Transformer, self).__init__()
 
-        self.encoder = Encoder(num_layers, d_model, num_heads, dff,
-                               input_size, pe_input, rate)
+        self.encoder = Encoder(num_layers, d_model, num_heads, dff, input_size, pe_input, rate)
 
-        self.decoder = Decoder(num_layers, d_model, num_heads, dff,
-                               output_size, pe_target, rate)
+        self.decoder = Decoder(num_layers, d_model, num_heads, dff, pe_target, rate)
 
         self.final_layer = tf.keras.layers.Dense(output_size)
 
