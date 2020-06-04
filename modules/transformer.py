@@ -230,7 +230,7 @@ class Encoder(tf.keras.layers.Layer):
         # 将嵌入和位置编码相加。
         x = self.embedding(x)  # (batch_size, input_seq_len, d_model)
         x *= tf.math.sqrt(tf.cast(self.d_model, tf.float32))
-        x += self.pos_encoding[:, :seq_len, :]
+        # x += self.pos_encoding[:, :seq_len, :]
 
         x = self.dropout(x, training=training)
 
@@ -296,7 +296,7 @@ class Transformer(tf.keras.Model):
 
         self.final_layer = tf.keras.layers.Dense(output_size)
         self.stop_token_net = Dense(units=1)
-        self.post_net = PostNet(num_layers=4, units=256, output_size=512)
+        self.post_net = PostNet(num_layers=4, units=256, output_size=513)
 
     def call(self, inp, tar, training, enc_padding_mask, look_ahead_mask, dec_padding_mask):
         enc_output = self.encoder(inp, training, enc_padding_mask)  # (batch_size, inp_seq_len, d_model)

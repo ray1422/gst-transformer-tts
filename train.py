@@ -2,13 +2,13 @@ from abc import ABC
 
 import tensorflow as tf
 
-from fake_dataset import get_dataset
+from dataset import get_pinyin_dataset
 from modules.transformer import *
 
 """ hyper parm """
 num_layers = 4
 d_model = 128
-dff = 512
+dff = 513
 num_heads = 8
 
 input_size = 53
@@ -47,7 +47,7 @@ def main():
     train_step_signature = [
         tf.TensorSpec(shape=(None, None), dtype=tf.int32),
         tf.TensorSpec(shape=(None, None, 80), dtype=tf.float32),
-        tf.TensorSpec(shape=(None, None, 512), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, None, 513), dtype=tf.float32),
         tf.TensorSpec(shape=(None,), dtype=tf.int32),
     ]
 
@@ -87,9 +87,13 @@ def main():
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         return loss, losses, stop_loss
+    
+
+    train_dataset = get_pinyin_dataset("/work/ray200289/gst_tacotron_bert/TFRecords/train_chewing_bert_slim.tfrecords", 8, shuffle_size=30)
+    valid_dataset = get_pinyin_dataset("/work/ray200289/gst_tacotron_bert/TFRecords/dev_chewing_bert_slim.tfrecords", 8)
 
     for epoch in range(epochs):
-        for step, (mels, spectrograms, spectrogram_length, tokens, token_length) in enumerate(get_dataset()):
+        for step, (mels, spectrograms, spectrogram_length, tokens, token_length) in enumerate(train_dataset):
             # print("token", tokens.shape)
             # print("mel", mels.shape)
 

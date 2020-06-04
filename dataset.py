@@ -1,12 +1,13 @@
 import json
 
 import tensorflow as tf
-
-with open('hyper_parameters.json', 'r') as f:
-    hp_dict = json.load(f)
+from tqdm import tqdm
 
 
-def get_pinyin_dataset(filename, batch_size=hp_dict["Train"]["Batch_Size"]):
+MAX_TOKEN_LENGTH = 72
+MAX_SPE_LENGTH = 600
+
+def get_pinyin_dataset(filename, batch_size=32, shuffle_size=1):
     feature = {
         'mels': tf.io.VarLenFeature(dtype=tf.float32),
         'spectrograms': tf.io.VarLenFeature(dtype=tf.float32),
@@ -23,24 +24,24 @@ def get_pinyin_dataset(filename, batch_size=hp_dict["Train"]["Batch_Size"]):
         spectrogram_length = feature_dict['spectrogram_length']
         tokens = tf.sparse.to_dense(feature_dict['tokens'])
         token_length = feature_dict['token_length']
-        mels = tf.reshape(mels, shape=(spectrogram_length, -1))
-        spectrograms = tf.reshape(spectrograms, shape=(spectrogram_length, -1))
-
+        mels = tf.reshape(mels, shape=(spectrogram_length, -1))[:MAX_SPE_LENGTH, :]
+        spectrograms = tf.reshape(spectrograms, shape=(spectrogram_length, -1))[:MAX_SPE_LENGTH, :]
+        spectrogram_length = tf.clip_by_value(spectrogram_length, 0, MAX_SPE_LENGTH - 1)
         return mels, spectrograms, spectrogram_length, tokens, token_length
 
     filenames = [filename]
-    raw_dataset = tf.data.TFRecordDataset(filenames)
+    raw_dataset = tf.data.TFRecordDataset(filenames).shuffle(shuffle_size)
     dataset = raw_dataset.map(_parse_function)
     dataset = dataset.padded_batch(batch_size=batch_size,
-                                   padding_values=(-1.,
-                                                   -1.,
-                                                   tf.constant(-1, dtype=tf.int64),
-                                                   tf.constant(-1, dtype=tf.int64),
-                                                   tf.constant(-1, dtype=tf.int64)),
-                                   padded_shapes=((hp_dict["Sound"]["max_spe_length"], hp_dict["Sound"]["Mel_Dim"]),
-                                                  (hp_dict["Sound"]["max_spe_length"], hp_dict["Sound"]["Spectrogram_Dim"]),
+                                   padding_values=(0.,
+                                                   0.,
+                                                   tf.constant(0, dtype=tf.int64),
+                                                   tf.constant(0, dtype=tf.int64),
+                                                   tf.constant(0, dtype=tf.int64)),
+                                   padded_shapes=((MAX_SPE_LENGTH, 80),
+                                                  (MAX_SPE_LENGTH, 513),
                                                   (),
-                                                  hp_dict["Token"]["max_length"],
+                                                  MAX_TOKEN_LENGTH,
                                                   ()))
 
     return dataset
