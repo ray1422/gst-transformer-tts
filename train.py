@@ -89,11 +89,11 @@ def main():
         return loss, losses, stop_loss
 
     for epoch in range(epochs):
-        for step, (inputs, mels, spes, spe_lengths) in enumerate(get_dataset()):
+        for step, (mels, spectrograms, spectrogram_length, tokens, token_length) in enumerate(get_dataset()):
             # print("token", tokens.shape)
             # print("mel", mels.shape)
 
-            loss, losses, stop_loss = train_step(inputs, mels, spes, spe_lengths)
+            loss, losses, stop_loss = train_step(tokens, mels, spectrograms, spectrogram_length)
             print(f"steps {step}  loss: {loss:.5f}, losses: {losses:.5f}, stops: {stop_loss:.5f}")
 
 
