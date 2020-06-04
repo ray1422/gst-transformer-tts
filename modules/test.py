@@ -1,4 +1,4 @@
-from modules.transformer import Transformer
+from modules.transformer import Transformer, create_masks
 import tensorflow as tf
 
 if __name__ == '__main__':
@@ -7,12 +7,13 @@ if __name__ == '__main__':
         input_size=50, output_size=512,
         pe_input=10000, pe_target=6000)
 
-    temp_input = tf.random.uniform((64, 62), maxval=20, dtype=tf.int32)  # token
-    temp_target = tf.random.uniform((64, 30, 512))
+    temp_input = tf.random.uniform((3, 62), maxval=20, dtype=tf.int32)  # token
+    temp_target = tf.random.uniform((3, 90, 512))
+    enc_padding_mask, combined_mask, dec_padding_mask = create_masks(temp_input, temp_target)
 
-    fn_out, _ = sample_transformer(temp_input, temp_target, training=False,
-                                   enc_padding_mask=None,
-                                   look_ahead_mask=None,
-                                   dec_padding_mask=None)
+    prenet_output, stops, post_output, attention_weights = sample_transformer(temp_input, temp_target, training=True,
+                                                                              enc_padding_mask=enc_padding_mask,
+                                                                              look_ahead_mask=combined_mask,
+                                                                              dec_padding_mask=dec_padding_mask)
 
-    print(fn_out.shape)  # (batch_size, tar_seq_len, target_vocab_size)
+    print(post_output.shape)  # (batch_size, tar_seq_len, target_vocab_size)

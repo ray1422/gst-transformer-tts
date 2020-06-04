@@ -45,37 +45,56 @@ def main():
     optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
 
     train_step_signature = [
-        tf.TensorSpec(shape=(None, None), dtype=tf.int64),
-        tf.TensorSpec(shape=(None, None, target_size), dtype=tf.int64),
+        tf.TensorSpec(shape=(None, None), dtype=tf.int32),
+        tf.TensorSpec(shape=(None, None, 80), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, None, 512), dtype=tf.float32),
+        tf.TensorSpec(shape=(None,), dtype=tf.int32),
     ]
 
-    @tf.function(input_signature=train_step_signature)
-    def train_step(inputs, targets):
-        def loss_function(outputs):
-            # TODO
-            return tf.reduce_mean(outputs - targets)
+    # @tf.function(input_signature=train_step_signature)
+    def train_step(inputs, mels, spes, spe_lengths):
 
-        tar_inp = targets[:, :-1, ...]
-        tar_real = targets[:, 1:, ...]
+        def loss_function(_prenet_outputs, _stops, _postnet_outputs, _spe_length, _mels, _spes):
+            prenet_loss = tf.reduce_mean(tf.square(_prenet_outputs - _mels), axis=[-1])
+            postnet_loss = tf.reduce_mean(tf.square(_postnet_outputs - _spes), axis=[-1])
 
-        enc_padding_mask, combined_mask, dec_padding_mask = create_masks(tar_inp, tar_inp)
-        print(enc_padding_mask)
-        print(combined_mask)
-        print(dec_padding_mask)
+            _stops = _stops[:, :, 0]
+            stop_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=_spe_length, logits=_stops)
+            stop_loss = tf.reduce_mean(stop_loss)
+            alpha, beta, gamma = 1., 1., 1.
+            losses = prenet_loss + postnet_loss
+            losses *= tf.sequence_mask(_spe_length, maxlen=losses.shape[1], dtype=tf.float32)
+            losses = tf.reduce_mean(tf.reduce_sum(losses, axis=-1) / tf.cast(_spe_length, dtype=tf.float32))
+            loss = losses + stop_loss
+
+            return loss, losses, stop_loss
+
+        mels = tf.concat([tf.ones_like(mels[:, 0:1, :]), mels], axis=1)
+
+        mel_inp = mels[:, :-1, ...]
+        mel_real = mels[:, 1:, ...]
+        enc_padding_mask, combined_mask, dec_padding_mask = create_masks(inputs, mel_inp)
+
         with tf.GradientTape() as tape:
-            predictions, _ = model(inputs, tar_inp,
-                                   True,
-                                   enc_padding_mask,
-                                   combined_mask,
-                                   dec_padding_mask)
-            loss = loss_function(tar_real)
+            prenet_output, stops, post_output, attention_weights = model(inputs, mel_inp,
+                                                                         True,
+                                                                         enc_padding_mask,
+                                                                         combined_mask,
+                                                                         dec_padding_mask)
+
+            loss, losses, stop_loss = loss_function(prenet_output, stops, post_output, spe_lengths, mel_real, spes)
 
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+        return loss, losses, stop_loss
 
     for epoch in range(epochs):
-        for mels, spectrograms, tokens in get_dataset():
-            train_step(tokens, mels)
+        for step, (inputs, mels, spes, spe_lengths) in enumerate(get_dataset()):
+            # print("token", tokens.shape)
+            # print("mel", mels.shape)
+
+            loss, losses, stop_loss = train_step(inputs, mels, spes, spe_lengths)
+            print(f"steps {step}  loss: {loss:.5f}, losses: {losses:.5f}, stops: {stop_loss:.5f}")
 
 
 if __name__ == '__main__':

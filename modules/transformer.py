@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+from tensorflow.keras.layers import *
 
 
 def get_angles(pos, i, d_model):
@@ -28,7 +29,9 @@ def create_padding_mask(seq):
 
     # 添加额外的维度来将填充加到
     # 注意力对数（logits）。
-    return seq[:, tf.newaxis, tf.newaxis, :]  # (batch_size, 1, 1, seq_len)
+    if len(seq.shape) == 2:
+        return seq[:, tf.newaxis, tf.newaxis, :]
+    return seq[:, tf.newaxis, tf.newaxis, :, 0]  # (batch_size, 1, 1, seq_len)
 
 
 def create_look_ahead_mask(size):
@@ -84,7 +87,6 @@ def scaled_dot_product_attention(q, k, v, mask):
         # softmax 在最后一个轴（seq_len_k）上归一化，因此分数
     # 相加等于1。
     attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)  # (..., seq_len_q, seq_len_k)
-
     output = tf.matmul(attention_weights, v)  # (..., seq_len_q, depth_v)
 
     return output, attention_weights
@@ -115,7 +117,6 @@ class MultiHeadAttention(tf.keras.layers.Layer):
 
     def call(self, v, k, q, mask):
         batch_size = tf.shape(q)[0]
-
         q = self.wq(q)  # (batch_size, seq_len, d_model)
         k = self.wk(k)  # (batch_size, seq_len, d_model)
         v = self.wv(v)  # (batch_size, seq_len, d_model)
@@ -126,6 +127,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
 
         # scaled_attention.shape == (batch_size, num_heads, seq_len_q, depth)
         # attention_weights.shape == (batch_size, num_heads, seq_len_q, seq_len_k)
+
         scaled_attention, attention_weights = scaled_dot_product_attention(
             q, k, v, mask)
 
@@ -244,7 +246,7 @@ class Decoder(tf.keras.layers.Layer):
 
         self.d_model = d_model
         self.num_layers = num_layers
-
+        self.dense = Dense(units=d_model)
         self.pos_encoding = positional_encoding(maximum_position_encoding, d_model)
 
         self.dec_layers = [DecoderLayer(d_model, num_heads, dff, rate) for _ in range(num_layers)]
@@ -253,7 +255,7 @@ class Decoder(tf.keras.layers.Layer):
     def call(self, x, enc_output, training, look_ahead_mask, padding_mask):
         # seq_len = tf.shape(x)[1]
         attention_weights = {}
-
+        x = self.dense(x)
         for i in range(self.num_layers):
             x, block1, block2 = self.dec_layers[i](x, enc_output, training, look_ahead_mask, padding_mask)
 
@@ -262,6 +264,25 @@ class Decoder(tf.keras.layers.Layer):
 
         # x.shape == (batch_size, target_seq_len, d_model)
         return x, attention_weights
+
+
+class PostNet(tf.keras.Model):
+    def __init__(self, num_layers, units, output_size, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.first_layer = Dense(units=units)
+        self.my_layers = []
+        for _ in range(num_layers):
+            self.my_layers.append(Dense(units=units, activation=tf.nn.leaky_relu))  # ts, freq, uints
+        self.output_layer = Dense(units=output_size, activation=None)
+
+    def call(self, inputs, training=None, mask=None):
+        x = inputs
+        x = self.first_layer(x)
+        for la in self.my_layers:
+            x = x + la(x)
+
+        x = self.output_layer(x)
+        return x
 
 
 class Transformer(tf.keras.Model):
@@ -274,13 +295,17 @@ class Transformer(tf.keras.Model):
         self.decoder = Decoder(num_layers, d_model, num_heads, dff, pe_target, rate)
 
         self.final_layer = tf.keras.layers.Dense(output_size)
+        self.stop_token_net = Dense(units=1)
+        self.post_net = PostNet(num_layers=4, units=256, output_size=512)
 
     def call(self, inp, tar, training, enc_padding_mask, look_ahead_mask, dec_padding_mask):
         enc_output = self.encoder(inp, training, enc_padding_mask)  # (batch_size, inp_seq_len, d_model)
 
         # dec_output.shape == (batch_size, tar_seq_len, d_model)
         dec_output, attention_weights = self.decoder(tar, enc_output, training, look_ahead_mask, dec_padding_mask)
-
+        stops = self.stop_token_net(dec_output)
         final_output = self.final_layer(dec_output)  # (batch_size, tar_seq_len, target_vocab_size)
 
-        return final_output, attention_weights
+        post_output = self.post_net(final_output)
+
+        return final_output, stops, post_output, attention_weights
